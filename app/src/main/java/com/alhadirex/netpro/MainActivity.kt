@@ -7,7 +7,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -21,7 +20,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -33,7 +31,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            // استخدام تصميم داكن احترافي لتطبيقات الشبكات
             MaterialTheme(
                 colorScheme = darkColorScheme(
                     primary = Color(0xFF8B5CF6),
@@ -52,35 +49,25 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun NetProScreen(context: Context) {
     var signal by remember { mutableStateOf("--") }
-    var network by remember { mutableStateOf("غير معروف") }
+    var network by remember { mutableStateOf("غير متصل") }
+
+    val updateSignal = {
+        val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        val info = wifi.connectionInfo
+        if (info != null && info.ssid != null && info.ssid != "<unknown ssid>") {
+            signal = "${info.rssi}"
+            network = info.ssid.replace("\"", "")
+        } else {
+            signal = "--"
+            network = "غير متصل"
+        }
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            val wifi = context.applicationContext
-                .getSystemService(Context.WIFI_SERVICE) as WifiManager
-            val info = wifi.connectionInfo
-            signal = "${info.rssi}"
-            network = info.ssid ?: "غير معروف"
-        }
-    }
-
-    val measureAction = {
-        if (ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
-            val wifi = context.applicationContext
-                .getSystemService(Context.WIFI_SERVICE) as WifiManager
-            val info = wifi.connectionInfo
-            signal = "${info.rssi}"
-            network = info.ssid ?: "غير معروف"
-        } else {
-            permissionLauncher.launch(
-                Manifest.permission.ACCESS_FINE_LOCATION
-            )
+            updateSignal()
         }
     }
 
@@ -95,7 +82,7 @@ fun NetProScreen(context: Context) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Header Section
+            // Header
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(top = 20.dp)) {
                 Box(
                     modifier = Modifier
@@ -114,21 +101,15 @@ fun NetProScreen(context: Context) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
                     text = "NetPro",
-                    style = MaterialTheme.typography.headlineMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
-                    )
+                    style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                 )
                 Text(
                     text = "NETWORK ANALYZER",
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        color = Color.Gray,
-                        letterSpacing = 2.sp
-                    )
+                    style = MaterialTheme.typography.labelMedium.copy(color = Color.Gray, letterSpacing = 2.sp)
                 )
             }
 
-            // Main Signal Card (Modern Dashboard Style)
+            // Main Card
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -142,37 +123,18 @@ fun NetProScreen(context: Context) {
                         .padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.SignalWifi4Bar,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.SignalWifi4Bar, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "قوة إشارة Wi-Fi",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color.Gray
-                        )
+                        Text("قوة إشارة Wi-Fi", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Signal Value Display
-                    Row(
-                        verticalAlignment = Alignment.Bottom,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
+                    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.Center) {
                         Text(
                             text = signal,
-                            style = MaterialTheme.typography.displayLarge.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 64.sp
-                            ),
+                            style = MaterialTheme.typography.displayLarge.copy(fontWeight = FontWeight.Bold, fontSize = 64.sp),
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         if (signal != "--") {
@@ -189,12 +151,7 @@ fun NetProScreen(context: Context) {
                     Divider(color = Color.White.copy(alpha = 0.05f), thickness = 1.dp)
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Network Name
-                    Text(
-                        text = "اسم الشبكة",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.Gray
-                    )
+                    Text("اسم الشبكة", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = network,
@@ -205,34 +162,29 @@ fun NetProScreen(context: Context) {
                 }
             }
 
-            // Action Button
+            // Button
             Button(
-                onClick = measureAction,
+                onClick = {
+                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                        updateSignal()
+                    } else {
+                        permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
                 shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
-                Text(
-                    text = "قياس قوة الإشارة",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                )
+                Text("قياس قوة الإشارة", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
             }
 
             // Footer
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(bottom = 10.dp)) {
-                Text(
-                    text = "Developed & Designed by Alhadi Rex",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray
-                )
+                Text("Developed & Designed by Alhadi Rex", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                 Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "All Rights Reserved 2026 ©",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.Gray.copy(alpha = 0.7f)
-                )
+                Text("All Rights Reserved 2026 ©", style = MaterialTheme.typography.labelSmall, color = Color.Gray.copy(alpha = 0.7f))
             }
         }
     }
