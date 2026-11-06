@@ -1,4 +1,4 @@
-import android.Manifest
+package com.alhadirex.netpro
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.wifi.WifiManager
