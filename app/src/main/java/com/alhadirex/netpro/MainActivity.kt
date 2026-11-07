@@ -2,11 +2,15 @@
 package com.alhadirex.netpro
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.wifi.WifiManager
 import android.os.Bundle
+import android.telephony.PhoneStateListener
+import android.telephony.SignalStrength
 import android.telephony.TelephonyManager
+import android.os.Build
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -33,7 +37,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
 import java.net.URL
-import kotlin.system.measureTimeMillis
+import java.util.Locale
 
 private val Navy = Color(0xFF071426)
 private val CardColor = Color(0xFF132943)
@@ -41,6 +45,7 @@ private val Cyan = Color(0xFF00D4FF)
 private val Purple = Color(0xFF9B7BFF)
 private val White = Color(0xFFF4F7FF)
 private val Green = Color(0xFF35D69A)
+private val Orange = Color(0xFFFFB547)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -66,11 +71,30 @@ fun NetProScreen() {
     val scope = rememberCoroutineScope()
 
     var wifiValue by remember { mutableStateOf("--") }
-    var wifiStatus by remember { mutableStateOf("لم يتم القياس") }
+    var wifiStatus by remember { mutableStateOf("بانتظار القراءة") }
 
     var mobileValue by remember { mutableStateOf("--") }
-    var mobileStatus by remember { mutableStateOf("لم يتم القياس") }
+    var mobileDbm by remember { mutableStateOf("--") }
+    var mobileStatus by remember { mutableStateOf("بانتظار قراءة الإشارة") }
     var mobileType by remember { mutableStateOf("غير معروف") }
+
+    var phonePermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.READ_PHONE_STATE
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    var locationPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
 
     var download by remember { mutableStateOf("--") }
     var upload by remember { mutableStateOf("--") }
@@ -79,18 +103,23 @@ fun NetProScreen() {
     var testing by remember { mutableStateOf(false) }
     var testStatus by remember { mutableStateOf("جاهز لاختبار السرعة") }
 
-    fun refreshSignals() {
+    fun refreshWifi() {
         try {
             val wifi = context.applicationContext
                 .getSystemService(Context.WIFI_SERVICE) as WifiManager
 
-            val rssi = wifi.connectionInfo.rssi
+            val info = wifi.connectionInfo
 
-            if (wifi.isWifiEnabled && rssi in -100..-1) {
-                val percent = ((rssi + 100) * 2).coerceIn(0, 100)
-                wifiValue = "$percent%"
+            if (wifi.isWifiEnabled &&
+                info.networkId != -1 &&
+                info.rssi in -100..-1
+            ) {
+                val rssi = info.rssi
+                wifiValue = "$rssi dBm"
+
                 wifiStatus = when {
-                    rssi >= -55 -> "ممتازة"
+                    rssi >= -50 -> "ممتازة جداً"
+                    rssi >= -60 -> "ممتازة"
                     rssi >= -67 -> "جيدة جداً"
                     rssi >= -75 -> "جيدة"
                     rssi >= -85 -> "ضعيفة"
@@ -98,10 +127,54 @@ fun NetProScreen() {
                 }
             } else {
                 wifiValue = "--"
-                wifiStatus = "غير متصل بالواي فاي"
+                wifiStatus = "غير متصل بشبكة Wi-Fi"
             }
         } catch (e: Exception) {
+            wifiValue = "--"
             wifiStatus = "تعذر قراءة الإشارة"
+        }
+    }
+
+    fun updateMobileSignal(signal: SignalStrength?) {
+        if (signal == null) {
+            mobileValue = "--"
+            mobileDbm = "--"
+            mobileStatus = "بانتظار بيانات الإشارة"
+            return
+        }
+
+        val level = signal.level.coerceIn(0, 4)
+
+        mobileValue = "$level / 4"
+
+        mobileStatus = when (level) {
+            4 -> "ممتازة جداً"
+            3 -> "جيدة جداً"
+            2 -> "جيدة"
+            1 -> "ضعيفة"
+            else -> "ضعيفة جداً"
+        }
+
+        mobileDbm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                val dbm = signal.cellSignalStrengths
+                    .map { it.dbm }
+                    .firstOrNull { it in -150..-1 }
+
+                dbm?.let { "$it dBm" } ?: "غير متاح"
+            } catch (e: Exception) {
+                "غير متاح"
+            }
+        } else {
+            "غير متاح"
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    fun refreshMobileType() {
+        if (!phonePermission) {
+            mobileType = "إذن الهاتف غير متاح"
+            return
         }
 
         try {
@@ -120,36 +193,25 @@ fun NetProScreen() {
                 TelephonyManager.NETWORK_TYPE_EDGE,
                 TelephonyManager.NETWORK_TYPE_GPRS,
                 TelephonyManager.NETWORK_TYPE_GSM -> "2G"
-                else -> "غير معروف"
+                TelephonyManager.NETWORK_TYPE_IWLAN -> "Wi-Fi Calling"
+                else -> "غير معروف أو غير متصل"
             }
-
-            val level = phone.signalStrength?.level
-
-            if (level != null && level in 1..4) {
-                mobileValue = "${level * 25}%"
-                mobileStatus = when (level) {
-                    4 -> "ممتازة"
-                    3 -> "جيدة جداً"
-                    2 -> "جيدة"
-                    else -> "ضعيفة"
-                }
-            } else {
-                mobileValue = "--"
-                mobileStatus = "قراءة الإشارة غير متاحة"
-            }
-        } catch (e: SecurityException) {
-            mobileValue = "--"
-            mobileStatus = "إذن الهاتف غير متاح"
         } catch (e: Exception) {
-            mobileValue = "--"
-            mobileStatus = "تعذر قراءة الإشارة"
+            mobileType = "غير متاح"
         }
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) {
-        refreshSignals()
+    ) { result ->
+        phonePermission = result[Manifest.permission.READ_PHONE_STATE]
+            ?: phonePermission
+
+        locationPermission = result[Manifest.permission.ACCESS_FINE_LOCATION]
+            ?: locationPermission
+
+        refreshWifi()
+        refreshMobileType()
     }
 
     fun checkPermissions() {
@@ -165,14 +227,67 @@ fun NetProScreen() {
         }
 
         if (missing.isEmpty()) {
-            refreshSignals()
+            phonePermission = true
+            locationPermission = true
+            refreshWifi()
+            refreshMobileType()
         } else {
             permissionLauncher.launch(missing.toTypedArray())
         }
     }
 
+    DisposableEffect(phonePermission) {
+        if (!phonePermission) {
+            mobileValue = "--"
+            mobileDbm = "--"
+            mobileStatus = "يرجى السماح بإذن الهاتف"
+            onDispose { }
+        } else {
+            val phone = context.getSystemService(
+                Context.TELEPHONY_SERVICE
+            ) as TelephonyManager
+
+            val listener = object : PhoneStateListener() {
+                override fun onSignalStrengthsChanged(
+                    signalStrength: SignalStrength
+                ) {
+                    super.onSignalStrengthsChanged(signalStrength)
+                    updateMobileSignal(signalStrength)
+                }
+            }
+
+            try {
+                phone.listen(
+                    listener,
+                    PhoneStateListener.LISTEN_SIGNAL_STRENGTHS
+                )
+
+                try {
+                    updateMobileSignal(phone.signalStrength)
+                } catch (e: Exception) {
+                    mobileStatus = "بانتظار تحديث الإشارة"
+                }
+            } catch (e: SecurityException) {
+                mobileStatus = "تعذر الوصول إلى إشارة الهاتف"
+            }
+
+            onDispose {
+                phone.listen(
+                    listener,
+                    PhoneStateListener.LISTEN_NONE
+                )
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         checkPermissions()
+
+        while (true) {
+            refreshWifi()
+            refreshMobileType()
+            kotlinx.coroutines.delay(3000)
+        }
     }
 
     Column(
@@ -185,61 +300,58 @@ fun NetProScreen() {
     ) {
 
         Text(
-            text = "NetPro",
+            "NetPro",
             color = Cyan,
             fontSize = 38.sp,
             fontWeight = FontWeight.ExtraBold
         )
 
-        Spacer(modifier = Modifier.height(6.dp))
-
         Text(
-            text = "محلل قوة الشبكات وسرعة الإنترنت",
+            "محلل قوة الشبكات وسرعة الإنترنت",
             color = White,
-            fontSize = 16.sp,
-            textAlign = TextAlign.Center
+            fontSize = 15.sp
         )
 
-        Spacer(modifier = Modifier.height(26.dp))
+        Spacer(Modifier.height(25.dp))
 
         SignalCard(
             emoji = "📶",
             title = "شبكة Wi-Fi",
             value = wifiValue,
             status = wifiStatus,
-            description = "قوة إشارة الواي فاي",
+            description = "قوة الإشارة الفعلية بوحدة dBm",
             color = Cyan
         )
 
-        Spacer(modifier = Modifier.height(15.dp))
+        Spacer(Modifier.height(15.dp))
 
         SignalCard(
             emoji = "📡",
             title = "شبكة الهاتف",
             value = mobileValue,
             status = mobileStatus,
-            description = "نوع الاتصال: $mobileType",
+            description = "قوة الإشارة: $mobileDbm | $mobileType",
             color = Purple
         )
 
-        Spacer(modifier = Modifier.height(25.dp))
+        Spacer(Modifier.height(25.dp))
 
         Text(
-            text = "اختبار سرعة الإنترنت",
+            "اختبار سرعة الإنترنت",
             color = White,
             fontSize = 23.sp,
             fontWeight = FontWeight.Bold
         )
 
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(Modifier.height(8.dp))
 
         Text(
-            text = testStatus,
+            testStatus,
             color = Cyan,
             fontSize = 13.sp
         )
 
-        Spacer(modifier = Modifier.height(18.dp))
+        Spacer(Modifier.height(18.dp))
 
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -254,48 +366,42 @@ fun NetProScreen() {
                     .padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+
                 Box(
                     modifier = Modifier
-                        .size(150.dp)
-                        .background(
-                            Navy,
-                            CircleShape
-                        ),
+                        .size(155.dp)
+                        .background(Navy, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = if (testing) "..." else download,
+                            download,
                             color = Cyan,
                             fontSize = 29.sp,
                             fontWeight = FontWeight.ExtraBold
                         )
+                        Text("Mbps", color = White)
                         Text(
-                            text = "Mbps",
-                            color = White,
-                            fontSize = 14.sp
-                        )
-                        Text(
-                            text = "DOWNLOAD",
+                            "DOWNLOAD",
                             color = White.copy(alpha = 0.65f),
                             fontSize = 11.sp
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(22.dp))
+                Spacer(Modifier.height(22.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
                     SpeedResult("UPLOAD", upload, Cyan)
-                    SpeedResult("PING", ping, Purple)
+                    SpeedResult("LATENCY", ping, Purple)
                 }
 
-                Spacer(modifier = Modifier.height(22.dp))
+                Spacer(Modifier.height(22.dp))
 
                 Button(
                     onClick = {
@@ -304,7 +410,7 @@ fun NetProScreen() {
                             download = "--"
                             upload = "--"
                             ping = "--"
-                            testStatus = "جاري الاتصال بخادم الاختبار..."
+                            testStatus = "جاري اختبار الاتصال..."
 
                             scope.launch {
                                 try {
@@ -314,19 +420,19 @@ fun NetProScreen() {
 
                                     ping = "${result.ping} ms"
                                     download = String.format(
-                                        java.util.Locale.US,
+                                        Locale.US,
                                         "%.2f",
                                         result.download
                                     )
                                     upload = String.format(
-                                        java.util.Locale.US,
+                                        Locale.US,
                                         "%.2f",
                                         result.upload
                                     )
-                                    testStatus = "اكتمل اختبار السرعة بنجاح"
+                                    testStatus = "اكتمل الاختبار"
                                 } catch (e: Exception) {
                                     testStatus =
-                                        "فشل الاختبار: تحقق من اتصال الإنترنت"
+                                        "فشل الاختبار: ${e.message ?: "تحقق من الإنترنت"}"
                                 } finally {
                                     testing = false
                                 }
@@ -344,7 +450,7 @@ fun NetProScreen() {
                     )
                 ) {
                     Text(
-                        text = if (testing) "جاري الاختبار..." else "ابدأ اختبار السرعة",
+                        if (testing) "جاري الاختبار..." else "ابدأ اختبار السرعة",
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -352,10 +458,14 @@ fun NetProScreen() {
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(Modifier.height(20.dp))
 
         OutlinedButton(
-            onClick = { checkPermissions() },
+            onClick = {
+                checkPermissions()
+                refreshWifi()
+                refreshMobileType()
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(50.dp),
@@ -364,22 +474,20 @@ fun NetProScreen() {
             Text("تحديث قياس الإشارة", color = Cyan)
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(Modifier.height(25.dp))
 
         Text(
-            text = "Developed & Designed by",
+            "Developed & Designed by",
             color = White.copy(alpha = 0.55f),
             fontSize = 12.sp
         )
 
         Text(
-            text = "Alhadi Rex",
+            "Alhadi Rex",
             color = Cyan,
             fontSize = 18.sp,
             fontWeight = FontWeight.Bold
         )
-
-        Spacer(modifier = Modifier.height(12.dp))
     }
 }
 
@@ -406,7 +514,7 @@ fun SignalCard(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(emoji, fontSize = 32.sp)
-            Spacer(modifier = Modifier.height(7.dp))
+            Spacer(Modifier.height(7.dp))
 
             Text(
                 title,
@@ -415,12 +523,12 @@ fun SignalCard(
                 fontWeight = FontWeight.Bold
             )
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(Modifier.height(10.dp))
 
             Text(
                 value,
                 color = color,
-                fontSize = 38.sp,
+                fontSize = 34.sp,
                 fontWeight = FontWeight.ExtraBold
             )
 
@@ -430,12 +538,13 @@ fun SignalCard(
                 fontSize = 14.sp
             )
 
-            Spacer(modifier = Modifier.height(5.dp))
+            Spacer(Modifier.height(5.dp))
 
             Text(
                 description,
                 color = White.copy(alpha = 0.65f),
-                fontSize = 12.sp
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center
             )
         }
     }
@@ -447,16 +556,14 @@ fun SpeedResult(
     value: String,
     color: Color
 ) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             title,
             color = White.copy(alpha = 0.65f),
             fontSize = 12.sp
         )
 
-        Spacer(modifier = Modifier.height(5.dp))
+        Spacer(Modifier.height(5.dp))
 
         Text(
             value,
@@ -476,7 +583,7 @@ data class SpeedTestResult(
 fun runSpeedTest(): SpeedTestResult {
     val pingTimes = mutableListOf<Long>()
 
-    repeat(5) {
+    repeat(3) {
         val start = System.nanoTime()
 
         val connection = URL(
@@ -485,21 +592,19 @@ fun runSpeedTest(): SpeedTestResult {
 
         connection.connectTimeout = 15000
         connection.readTimeout = 15000
-        connection.requestMethod = "GET"
 
         try {
             connection.inputStream.use { input ->
-                val buffer = ByteArray(2048)
-                while (input.read(buffer) != -1) {
-                    // Read response
-                }
+                val buffer = ByteArray(1024)
+                while (input.read(buffer) != -1) { }
             }
         } finally {
             connection.disconnect()
         }
 
-        val elapsed = (System.nanoTime() - start) / 1_000_000
-        pingTimes.add(elapsed)
+        pingTimes.add(
+            (System.nanoTime() - start) / 1_000_000
+        )
     }
 
     val averagePing = pingTimes.average().toLong()
@@ -513,7 +618,6 @@ fun runSpeedTest(): SpeedTestResult {
 
     downloadConnection.connectTimeout = 20000
     downloadConnection.readTimeout = 60000
-    downloadConnection.requestMethod = "GET"
 
     var received = 0L
 
@@ -553,10 +657,12 @@ fun runSpeedTest(): SpeedTestResult {
     uploadConnection.readTimeout = 60000
     uploadConnection.requestMethod = "POST"
     uploadConnection.doOutput = true
+
     uploadConnection.setRequestProperty(
         "Content-Type",
         "application/octet-stream"
     )
+
     uploadConnection.setFixedLengthStreamingMode(uploadBytes)
 
     try {
@@ -573,9 +679,7 @@ fun runSpeedTest(): SpeedTestResult {
 
         uploadConnection.inputStream.use { input ->
             val buffer = ByteArray(1024)
-            while (input.read(buffer) != -1) {
-                // Read response
-            }
+            while (input.read(buffer) != -1) { }
         }
     } finally {
         uploadConnection.disconnect()
